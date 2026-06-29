@@ -1,0 +1,182 @@
+use database globalmart_db;
+create schema gold;
+use schema gold;
+
+
+--creating first table 
+CREATE OR REPLACE TABLE fct_daily_sales AS
+SELECT
+    DATE(transaction_ts) AS report_date,
+    store_id,
+    store_name,
+    store_city,
+    store_region,
+    category,
+
+    SUM(line_total) AS total_revenue,
+    SUM(quantity) AS total_units,
+    COUNT(DISTINCT transaction_id) AS total_txns,
+    AVG(line_total) AS avg_basket,
+    COUNT(DISTINCT customer_id) AS unique_customers,
+
+    CURRENT_TIMESTAMP() AS updated_at
+FROM globalmart_db.silver._pos_transactions
+GROUP BY 1,2,3,4,5,6;
+
+select * from fct_daily_sales;
+--creating 2nd file 
+CREATE OR REPLACE TABLE fct_gross_margin AS
+SELECT
+    p.store_id,
+    p.store_name,
+    p.store_city,
+    p.category,
+
+    SUM(p.line_total) AS total_revenue,
+    SUM(COALESCE(e.total_cost, 0)) AS total_cost,
+
+    SUM(p.line_total) - SUM(COALESCE(e.total_cost, 0)) AS gross_profit,
+
+    CASE 
+        WHEN SUM(p.line_total) = 0 THEN 0
+        ELSE 
+            (SUM(p.line_total) - SUM(COALESCE(e.total_cost, 0)))
+            / SUM(p.line_total) * 100
+    END AS gross_margin_pct,
+
+    SUM(p.quantity) AS total_units_sold,
+
+    CURRENT_TIMESTAMP() AS updated_at
+FROM globalmart_db.silver._pos_transactions p
+LEFT JOIN globalmart_db.silver.erp_orders e
+    ON p.store_id = e.store_id
+   AND p.category = e.category
+GROUP BY 1,2,3,4;
+
+select* from fct_gross_margin;
+
+
+--creating 3rd tabel
+CREATE OR REPLACE TABLE globalmart_db.gold.fct_store_iot_daily AS
+SELECT
+    DATE(event_ts) AS event_date,
+    store_id,
+    store_name,
+
+    AVG(IFF(sensor_name = 'temp_c', sensor_value, NULL)) AS avg_temp_c,
+    AVG(IFF(sensor_name = 'footfall', sensor_value, NULL)) AS avg_footfall,
+    AVG(IFF(sensor_name = 'weight_kg', sensor_value, NULL)) AS avg_shelf_weight,
+    AVG(IFF(sensor_name = 'humidity_pct', sensor_value, NULL)) AS avg_humidity_pct,
+    AVG(IFF(sensor_name = 'power_kw', sensor_value, NULL)) AS avg_power_kw,
+    AVG(IFF(sensor_name = 'queue_length', sensor_value, NULL)) AS avg_queue_length,
+
+    COUNT(DISTINCT device_id) AS device_count,
+    COUNT(DISTINCT CASE WHEN battery_pct < 20 THEN device_id END) AS low_battery_cnt,
+
+    CURRENT_TIMESTAMP() AS updated_at
+
+FROM globalmart_db.silver.sensor_readings
+
+GROUP BY 1,2,3;
+
+
+
+
+SELECT *
+FROM fct_store_iot_daily;
+
+
+--creating 4 th file 
+
+
+CREATE OR REPLACE TABLE fct_sales_vs_iot AS
+SELECT
+    s.report_date,
+    s.store_id,
+    s.store_name,
+    s.category,
+
+    s.total_revenue,
+    s.total_txns,
+    s.avg_basket,
+
+    i.avg_temp_c,
+    i.avg_footfall,
+    i.avg_shelf_weight,
+    i.avg_humidity_pct,
+    i.avg_power_kw,
+    i.avg_queue_length,
+    i.low_battery_cnt,
+
+    CURRENT_TIMESTAMP() AS updated_at
+FROM globalmart_db.gold.fct_daily_sales s
+LEFT JOIN globalmart_db.gold.fct_store_iot_daily i
+    ON s.store_id = i.store_id
+   AND s.report_date = i.event_date;
+
+
+select* from fct_sales_vs_iot;
+
+
+--testing 
+SELECT DISTINCT report_date
+FROM globalmart_db.gold.fct_daily_sales;
+
+
+SELECT DISTINCT event_date
+FROM globalmart_db.gold.fct_store_iot_daily;
+
+
+SELECT DISTINCT store_id
+FROM globalmart_db.gold.fct_daily_sales;
+
+SELECT
+    event_ts,
+    DATE(event_ts) AS event_date
+FROM globalmart_db.silver.sensor_readings
+LIMIT 10;
+
+
+SELECT MIN(report_date), MAX(report_date)
+FROM globalmart_db.gold.fct_daily_sales;
+
+
+SELECT MIN(event_date), MAX(event_date)
+FROM globalmart_db.gold.fct_store_iot_daily;
+
+
+SELECT MIN(report_date), MAX(report_date)
+FROM globalmart_db.gold.fct_sales_vs_iot;
+
+
+SELECT COUNT(*)
+FROM globalmart_db.gold.fct_sales_vs_iot
+WHERE report_date IS NULL;
+
+SELECT *
+FROM globalmart_db.gold.fct_sales_vs_iot
+LIMIT 10;
+
+
+--testing
+DESC TABLE GOLD.FCT_DAILY_SALES;
+DESC TABLE GOLD.FCT_GROSS_MARGIN;
+DESC TABLE GOLD.FCT_STORE_IOT_DAILY;
+DESC TABLE GOLD.FCT_SALES_VS_IOT;
+
+
+Total Revenue =
+SUM(FCT_DAILY_SALES[TOTAL_REVENUE])
+
+
+SELECT
+    SUM(TOTAL_REVENUE) AS TOTAL_REVENUE
+FROM GOLD.FCT_DAILY_SALES;
+
+SELECT *
+FROM globalmart_db.gold.fct_daily_sales
+LIMIT 10;
+
+
+
+DESC TABLE globalmart_db.gold.fct_daily_sales;

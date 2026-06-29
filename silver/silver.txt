@@ -1,0 +1,645 @@
+use database globalmart_db;
+create schema silver ;
+use schema silver;
+
+
+-- csv file => pos transactions
+CREATE OR REPLACE TABLE  _pos_transactions (
+  transaction_id    VARCHAR(30)   NOT NULL,
+  store_id          VARCHAR(10),
+  store_name        VARCHAR(100),
+  store_city        VARCHAR(50),
+  store_region      VARCHAR(50),
+  cashier_id        VARCHAR(15),
+  customer_id       VARCHAR(15),
+  transaction_ts    TIMESTAMP NOT NULL,   --  date+time combined
+  product_sku       VARCHAR(30),
+  product_name      VARCHAR(200),
+  category          VARCHAR(50),
+  subcategory       VARCHAR(30),
+  quantity          INTEGER,
+  unit_price        FLOAT,
+  discount_pct      FLOAT,
+  line_total        FLOAT,               -- derived: qty × price × discount
+  payment_method    VARCHAR(20),
+  loyalty_points    INTEGER,
+  processed_at     TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+)
+
+
+
+
+-- ##### Staging => SILVER SENSOR  READINGS
+CREATE OR REPLACE TABLE  sensor_readings (
+  event_id        VARCHAR(50)  NOT NULL,
+  event_type      VARCHAR(30),
+  store_id        VARCHAR(10),
+  store_name      VARCHAR(100),
+  event_ts        TIMESTAMP_NTZ,
+  device_id       VARCHAR(50),
+  firmware        VARCHAR(20),     --raw_payload:metadata:firmware
+  battery_pct     INTEGER,      -- raw_payload:metadata:battery_pct
+  store_floor     INTEGER,      -- raw_payload:metadata:store_floor
+  sensor_name     VARCHAR(50),   -- readings[] array (flattened)
+  sensor_value    FLOAT,        -- readings[] array (flattened)
+  sensor_unit     VARCHAR(20),   -- readings[] array (flattened)
+  processed_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
+)
+
+
+
+
+
+
+CREATE OR REPLACE TABLE erp_orders (
+order_id VARCHAR(15) NOT NULL,
+order_date TIMESTAMP,
+store_id VARCHAR(10),
+store_city VARCHAR(50),
+supplier_id VARCHAR(10),
+supplier_name VARCHAR(100),
+product_sku VARCHAR(30),
+category VARCHAR(50),
+quantity_ordered INTEGER,
+quantity_received INTEGER,
+unit_cost FLOAT,
+total_cost FLOAT,
+order_status VARCHAR(20),
+expected_delivery DATE,
+actual_delivery DATE,
+warehouse_id VARCHAR(15),
+lead_time_days INTEGER,
+is_late BOOLEAN,
+_processed_at TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+)
+
+-- merging 1 st file 
+CREATE OR REPLACE TASK ts_process_pos_transactions
+
+WAREHOUSE = COMPUTE_WH 
+
+SCHEDULE = '1 MINUTE'
+
+WHEN SYSTEM$STREAM_HAS_DATA(
+'globalmart_db.BRONZE.stream_transactions'
+)
+
+AS
+
+MERGE INTO _pos_transactions AS target
+
+
+USING (
+
+SELECT
+
+transaction_id,
+
+store_id,
+
+store_name,
+
+store_city,
+
+store_region,
+
+cashier_id,
+
+customer_id,
+
+TO_TIMESTAMP(
+transaction_date || ' ' || transaction_time
+) AS transaction_ts,
+
+product_sku,
+
+product_name,
+
+category,
+
+subcategory,
+
+quantity,
+
+unit_price,
+
+discount_pct,
+
+total_amount AS line_total,
+
+payment_method,
+
+loyalty_points
+
+
+FROM globalmart_db.BRONZE.stream_transactions
+
+
+) AS src
+
+
+
+
+ON target.transaction_id = src.transaction_id
+
+
+
+WHEN NOT MATCHED THEN
+
+
+INSERT (
+
+transaction_id,
+
+store_id,
+
+store_name,
+
+store_city,
+
+store_region,
+
+cashier_id,
+
+customer_id,
+
+transaction_ts,
+
+product_sku,
+
+product_name,
+
+category,
+
+subcategory,
+
+quantity,
+
+unit_price,
+
+discount_pct,
+
+line_total,
+
+payment_method,
+
+loyalty_points
+
+)
+
+
+VALUES (
+
+src.transaction_id,
+
+src.store_id,
+
+src.store_name,
+
+src.store_city,
+
+src.store_region,
+
+src.cashier_id,
+
+src.customer_id,
+
+src.transaction_ts,
+
+src.product_sku,
+
+src.product_name,
+
+src.category,
+
+src.subcategory,
+
+src.quantity,
+
+src.unit_price,
+
+src.discount_pct,
+
+src.line_total,
+
+src.payment_method,
+
+src.loyalty_points
+
+);
+
+
+ALTER TASK ts_process_pos_transactions RESUME;
+
+SHOW TASKS;
+
+
+--2 nd table
+CREATE OR REPLACE TASK ts_process_sensor_readings
+
+WAREHOUSE = COMPUTE_WH
+SCHEDULE = '1 MINUTE'
+
+WHEN SYSTEM$STREAM_HAS_DATA(
+'globalmart_db.BRONZE.stream_iot_events'
+)
+
+AS
+
+MERGE INTO sensor_readings AS target
+
+USING (
+
+SELECT
+
+f.value:event_id::VARCHAR AS event_id,
+
+f.value:event_type::VARCHAR AS event_type,
+
+f.value:store_id::VARCHAR AS store_id,
+
+f.value:store_name::VARCHAR AS store_name,
+
+TO_TIMESTAMP_NTZ(f.value:timestamp::STRING) AS event_ts,
+
+f.value:device_id::VARCHAR AS device_id,
+
+f.value:metadata:firmware::VARCHAR AS firmware,
+
+f.value:metadata:battery_pct::INTEGER AS battery_pct,
+
+f.value:metadata:store_floor::INTEGER AS store_floor,
+
+r.value:sensor::VARCHAR AS sensor_name,
+
+r.value:value::FLOAT AS sensor_value,
+
+r.value:unit::VARCHAR AS sensor_unit
+
+FROM globalmart_db.bronze.stream_iot_events s,
+
+LATERAL FLATTEN(INPUT => s.raw_data) f,
+
+LATERAL FLATTEN(INPUT => f.value:readings) r
+
+) AS src
+
+ON target.event_id = src.event_id
+AND target.sensor_name = src.sensor_name
+
+WHEN NOT MATCHED THEN
+
+INSERT (
+
+event_id,
+event_type,
+store_id,
+store_name,
+event_ts,
+device_id,
+firmware,
+battery_pct,
+store_floor,
+sensor_name,
+sensor_value,
+sensor_unit
+
+)
+
+VALUES (
+
+src.event_id,
+src.event_type,
+src.store_id,
+src.store_name,
+src.event_ts,
+src.device_id,
+src.firmware,
+src.battery_pct,
+src.store_floor,
+src.sensor_name,
+src.sensor_value,
+src.sensor_unit
+
+);
+ALTER TASK globalmart_db.silver.ts_process_sensor_readings RESUME;
+ALTER TASK globalmart_db.silver.ts_process_sensor_readings RESUME;
+SHOW TASKS LIKE 'TS_PROCESS_SENSOR_READINGS';
+EXECUTE TASK globalmart_db.silver.ts_process_sensor_readings;
+SELECT COUNT(*)
+FROM globalmart_db.bronze.stream_iot_events;
+TRUNCATE TABLE globalmart_db.silver.sensor_readings;
+--tesing
+SELECT COUNT(*)
+FROM globalmart_db.silver.sensor_readings;
+
+TRUNCATE TABLE globalmart_db.silver.sensor_readings;
+SELECT COUNT(*)
+FROM globalmart_db.silver.sensor_readings;
+
+--tesing
+SELECT COUNT(*)
+FROM sensor_readings;
+
+SELECT *
+FROM TABLE(
+INFORMATION_SCHEMA.TASK_HISTORY(
+TASK_NAME=>'TS_PROCESS_SENSOR_READINGS'
+)
+)
+ORDER BY SCHEDULED_TIME DESC
+LIMIT 5;
+
+SELECT *
+
+FROM (
+
+SELECT
+
+f.value:event_id::VARCHAR AS event_id,
+
+f.value:event_type::VARCHAR AS event_type,
+
+f.value:store_id::VARCHAR AS store_id,
+
+f.value:store_name::VARCHAR AS store_name,
+
+f.value:event_ts::TIMESTAMP_NTZ AS event_ts,
+
+f.value:device_id::VARCHAR AS device_id,
+
+f.value:metadata:firmware::VARCHAR AS firmware,
+
+f.value:metadata:battery_pct::INTEGER AS battery_pct,
+
+f.value:metadata:store_floor::INTEGER AS store_floor,
+
+r.value:sensor_name::VARCHAR AS sensor_name,
+
+r.value:sensor_value::FLOAT AS sensor_value,
+
+r.value:sensor_unit::VARCHAR AS sensor_unit
+
+FROM globalmart_db.bronze.iot_events s,
+
+LATERAL FLATTEN(INPUT => s.raw_data) f,
+
+LATERAL FLATTEN(INPUT => f.value:readings) r
+
+);
+
+SELECT COUNT(*)
+FROM globalmart_db.bronze.stream_iot_events;
+SELECT *
+FROM (
+
+SELECT
+
+s.raw_data:event_id::VARCHAR AS event_id,
+
+f.value:name::VARCHAR AS sensor_name,
+
+f.value:value::FLOAT AS sensor_value
+
+FROM globalmart_db.bronze.iot_events s,
+
+LATERAL FLATTEN(
+INPUT => s.raw_data:readings
+) f
+
+);
+--3 nd file
+CREATE OR REPLACE TASK ts_process_erp_orders
+
+WAREHOUSE = COMPUTE_WH
+
+SCHEDULE = '1 MINUTE'
+
+WHEN SYSTEM$STREAM_HAS_DATA(
+'globalmart_db.BRONZE.stream_erp_inventory'
+)
+
+AS
+
+MERGE INTO erp_orders AS target
+
+
+USING (
+
+SELECT
+
+UUID_STRING() AS order_id,
+
+snapshot_date::TIMESTAMP AS order_date,
+
+store_id,
+
+NULL AS store_city,
+
+NULL AS supplier_id,
+
+NULL AS supplier_name,
+
+product_sku,
+
+category,
+
+reorder_level AS quantity_ordered,
+
+quantity_on_hand AS quantity_received,
+
+NULL AS unit_cost,
+
+NULL AS total_cost,
+
+'RECEIVED' AS order_status,
+
+NULL AS expected_delivery,
+
+last_received_date AS actual_delivery,
+
+warehouse_id,
+
+NULL AS lead_time_days,
+
+FALSE AS is_late
+
+
+FROM globalmart_db.BRONZE.stream_erp_inventory
+
+
+) AS src
+
+
+ON target.product_sku = src.product_sku
+AND target.warehouse_id = src.warehouse_id
+
+
+WHEN NOT MATCHED THEN
+
+INSERT (
+
+order_id,
+
+order_date,
+
+store_id,
+
+store_city,
+
+supplier_id,
+
+supplier_name,
+
+product_sku,
+
+category,
+
+quantity_ordered,
+
+quantity_received,
+
+unit_cost,
+
+total_cost,
+
+order_status,
+
+expected_delivery,
+
+actual_delivery,
+
+warehouse_id,
+
+lead_time_days,
+
+is_late
+
+)
+
+
+VALUES (
+
+
+src.order_id,
+
+src.order_date,
+
+src.store_id,
+
+src.store_city,
+
+src.supplier_id,
+
+src.supplier_name,
+
+src.product_sku,
+
+src.category,
+
+src.quantity_ordered,
+
+src.quantity_received,
+
+src.unit_cost,
+
+src.total_cost,
+
+src.order_status,
+
+src.expected_delivery,
+
+src.actual_delivery,
+
+src.warehouse_id,
+
+src.lead_time_days,
+
+src.is_late
+
+);
+
+
+--
+ALTER TASK ts_process_sensor_readings SUSPEND;
+
+ALTER TASK ts_process_pos_transactions SUSPEND;
+
+ALTER TASK ts_process_erp_orders suspend;
+
+
+SHOW TASKS;
+
+
+SHOW TASKS IN SCHEMA SILVER;
+
+
+SELECT COUNT(*)
+FROM globalmart_db.silver.iot_events;
+
+
+ SELECT COUNT(*)
+                                        FROM globalmart_db.bronze.stream_iot_events;
+
+
+--tesing 
+SHOW TABLES IN SCHEMA globalmart_db.silver;
+
+
+
+SELECT COUNT(*)
+FROM globalmart_db.silver._pos_transactions;
+
+
+
+
+SELECT COUNT(*)
+FROM globalmart_db.silver.sensor_readings;
+
+
+SHOW TASKS LIKE 'TS_PROCESS_SENSOR_READINGS';
+
+
+SELECT *
+FROM TABLE(INFORMATION_SCHEMA.TASK_HISTORY())
+WHERE NAME = 'TS_PROCESS_SENSOR_READINGS'
+ORDER BY SCHEDULED_TIME DESC;
+
+
+SELECT COUNT(*)
+FROM globalmart_db.bronze.iot_events;
+
+SELECT *
+FROM globalmart_db.bronze.iot_events
+LIMIT 1;
+
+ALTER TASK globalmart_db.silver.ts_process_sensor_readings RESUME;
+
+EXECUTE TASK globalmart_db.silver.ts_process_sensor_readings;
+
+
+SELECT COUNT(*)
+FROM globalmart_db.silver.sensor_readings;
+
+
+SELECT *
+FROM globalmart_db.bronze.stream_iot_events;
+
+
+SELECT *
+FROM (
+
+SELECT raw_data
+FROM globalmart_db.bronze.iot_events;
+
+SELECT
+
+f.value:event_id::VARCHAR AS event_id,
+f.value:event_type::VARCHAR AS event_type,
+f.value:device_id::VARCHAR AS device_id
+
+FROM globalmart_db.bronze.iot_events s,
+
+LATERAL FLATTEN(
+INPUT => s.raw_data
+) f;

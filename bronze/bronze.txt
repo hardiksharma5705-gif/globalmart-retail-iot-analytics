@@ -1,0 +1,271 @@
+use database globalmart_db;
+use schema bronze;
+
+
+-- creating file format for the 1 st csv file 
+
+create or replace file format csv_format
+type = csv    
+skip_header=1
+field_delimiter=','
+field_optionally_enclosed_by='"';
+
+
+--creating 1 st table 
+create or replace table transactions(
+     transaction_id VARCHAR,
+    store_id VARCHAR,
+    store_name VARCHAR,
+    store_city VARCHAR,
+    store_region VARCHAR,
+    cashier_id VARCHAR,
+    customer_id VARCHAR,
+    transaction_date DATE,
+    transaction_time VARCHAR,
+    product_sku VARCHAR,
+    product_name VARCHAR,
+    category VARCHAR,
+    subcategory VARCHAR,
+    quantity NUMBER,
+    unit_price FLOAT,
+    discount_pct FLOAT,
+    total_amount FLOAT,
+    payment_method VARCHAR,
+    loyalty_points NUMBER,
+     LOAD_TIME TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
+    SOURCE_FILE STRING
+    
+);
+desc table transactions;
+
+-- creating STREAM  
+CREATE OR REPLACE STREAM stream_transactions
+ON TABLE transactions
+APPEND_ONLY = TRUE
+SHOW_INITIAL_ROWS = TRUE;
+
+SHOW STREAMS;
+
+LIST @stg_globalmart;
+
+--snowpile --
+CREATE OR REPLACE PIPE pos_pipe
+AUTO_INGEST = TRUE
+AS
+COPY INTO transactions
+(
+    transaction_id,
+    store_id,
+    store_name,
+    store_city,
+    store_region,
+    cashier_id,
+    customer_id,
+    transaction_date,
+    transaction_time,
+    product_sku,
+    product_name,
+    category,
+    subcategory,
+    quantity,
+    unit_price,
+    discount_pct,
+    total_amount,
+    payment_method,
+    loyalty_points,
+    source_file
+)
+FROM
+(
+    SELECT
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+        $11,$12,$13,$14,$15,$16,$17,$18,
+        $19,
+        METADATA$FILENAME
+    FROM @stg_globalmart/csv_files
+)
+FILE_FORMAT = (FORMAT_NAME = csv_format)
+ON_ERROR = CONTINUE;
+
+show pipes;
+
+
+
+/*ALTER PIPE pos_pipe REFRESH;
+
+SELECT COUNT(*) FROM transactions;
+
+SELECT COUNT(*) FROM stream_transactions;
+
+
+SELECT
+    METADATA$ACTION,
+    METADATA$ISUPDATE,
+    transaction_id
+FROM stream_transactions
+LIMIT 10;*/
+                          
+                          
+                          
+                          --2nd file --
+
+                          
+list @stg_globalmart;
+--file foramt for json file     
+create or replace  file format json_format
+type = json;
+
+--creation table for json file 
+create or replace table iot_events(
+    raw_data variant,
+    load_time timestamp default current_timestamp(),
+    source_file string
+);
+
+
+---creating stream for json FILE
+CREATE OR REPLACE STREAM stream_iot_events
+ON TABLE iot_events
+APPEND_ONLY = TRUE
+SHOW_INITIAL_ROWS = TRUE;
+--SELECT COUNT(*)
+--FROM globalmart_db.bronze.stream_iot_events;
+--drop stream stream_iot_events;
+show streams;
+
+ALTER TASK globalmart_db.silver.ts_process_sensor_readings RESUME;
+EXECUTE TASK globalmart_db.silver.ts_process_sensor_readings;
+
+--creating snow pipe 
+CREATE OR REPLACE PIPE iot_pipe
+AUTO_INGEST = TRUE
+AS
+COPY INTO iot_events
+(
+    raw_data,
+    source_file
+)
+FROM
+(
+    SELECT
+        $1,
+        METADATA$FILENAME
+    FROM @stg_globalmart/json_files
+)
+FILE_FORMAT = (FORMAT_NAME = json_format)
+ON_ERROR = CONTINUE;
+
+alter pipe iot_pipe refresh;
+
+SELECT *
+FROM iot_events;
+
+SELECT COUNT(*)
+FROM stream_iot_events;
+
+
+
+                    --3 rd file --
+
+
+-- listing stage 
+list @stg_globalmart;
+-- creating table parquet
+CREATE OR REPLACE TABLE erp_inventory_raw (
+    snapshot_date       DATE,
+    store_id            VARCHAR,
+    warehouse_id        VARCHAR,
+    product_sku         VARCHAR,
+    category            VARCHAR,
+    quantity_on_hand    NUMBER,
+    reorder_level       NUMBER,
+    max_stock_level     NUMBER,
+    last_received_date  DATE,
+
+    load_time           TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+    source_file         VARCHAR
+);
+
+-- creating parquet file format 
+
+CREATE OR REPLACE FILE FORMAT parquet_format
+TYPE = PARQUET;
+
+--creating stream for 3rd
+CREATE OR REPLACE STREAM stream_erp_inventory
+ON TABLE erp_inventory_raw
+APPEND_ONLY = TRUE
+SHOW_INITIAL_ROWS = TRUE;
+
+--creating snowpipe 
+CREATE OR REPLACE PIPE erp_inventory_pipe
+AUTO_INGEST = TRUE
+AS
+
+COPY INTO erp_inventory_raw
+(
+    snapshot_date,
+    store_id,
+    warehouse_id,
+    product_sku,
+    category,
+    quantity_on_hand,
+    reorder_level,
+    max_stock_level,
+    last_received_date,
+    source_file
+)
+
+FROM
+(
+    SELECT
+        $1:snapshot_date::DATE,
+        $1:store_id::VARCHAR,
+        $1:warehouse_id::VARCHAR,
+        $1:product_sku::VARCHAR,
+        $1:category::VARCHAR,
+        $1:quantity_on_hand::NUMBER,
+        $1:reorder_level::NUMBER,
+        $1:max_stock_level::NUMBER,
+        $1:last_received_date::DATE,
+        METADATA$FILENAME
+
+    FROM @stg_globalmart/parquet_files
+)
+
+FILE_FORMAT = (FORMAT_NAME = parquet_format)
+
+ON_ERROR = CONTINUE;
+
+ALTER PIPE erp_inventory_pipe REFRESH;
+
+SELECT COUNT(*)
+FROM erp_inventory_raw;
+
+
+SELECT *
+FROM erp_inventory_raw
+LIMIT 10;
+
+SELECT COUNT(*)
+FROM stream_erp_inventory;
+
+
+
+
+SELECT COUNT(*)
+FROM globalmart_db.bronze.iot_events;
+
+SELECT COUNT(*)
+FROM globalmart_db.bronze.stream_iot_events;
+
+--testing
+SELECT COUNT(*)
+FROM globalmart_db.silver.sensor_readings;
+
+SELECT
+event_ts,
+sensor_name,
+sensor_value
+FROM globalmart_db.silver.sensor_readings
+LIMIT 10;
