@@ -1,10 +1,10 @@
 # GlobalMart Retail + IoT Analytics
 
-An end-to-end Retail and IoT Analytics project built using **AWS S3, Snowflake, SQL, and Power BI** to transform raw retail, ERP, and IoT data into business-ready analytics.
+An end-to-end Retail and IoT Analytics project built using **AWS S3, Snowflake, SQL, Python, and Power BI** to transform raw retail, ERP, and IoT data into business-ready analytics.
 
 ## 📊 Project Overview
 
-This project implements a modern data pipeline that ingests raw data from AWS S3, processes it through Bronze, Silver, and Gold layers in Snowflake, and delivers analytical insights through Power BI dashboards.
+This project implements a modern data pipeline that ingests raw data from AWS S3, processes it through **Bronze, Silver, and Gold layers in Snowflake**, and delivers analytical insights through Power BI dashboards.
 
 ### Architecture
 
@@ -28,20 +28,20 @@ Power BI Dashboards
 
 ## 🛠️ Technologies Used
 
-* **SQL**
-* **Snowflake**
-* **AWS S3**
-* **Power BI**
-* **Python**
-* **Snowpipe**
-* **Streams**
-* **ETL / Data Transformation**
+* SQL
+* Snowflake
+* AWS S3
+* Power BI
+* Python
+* Snowpipe
+* Snowflake Streams
+* ETL / Data Transformation
 
 ## 🗂️ Data Pipeline
 
 ### Bronze Layer
 
-Raw data ingestion from AWS S3 into Snowflake.
+Raw data is ingested from AWS S3 into Snowflake.
 
 Key concepts:
 
@@ -54,7 +54,7 @@ Key concepts:
 
 ### Silver Layer
 
-Cleaned and transformed data prepared for analytics.
+The Silver layer contains cleaned and transformed data prepared for analytics.
 
 Key datasets include:
 
@@ -81,7 +81,7 @@ Key analytical tables:
 * `FCT_STORE_IOT_DAILY`
 * `FCT_SALES_VS_IOT`
 
-Analytical views and materialized views were also created for revenue, category performance, margin and IoT analysis.
+Analytical views and materialized views were also created for revenue, category performance, margin, and IoT analysis.
 
 ## 📈 Power BI Dashboard
 
@@ -96,7 +96,21 @@ The Gold layer was connected to Power BI to create dashboards covering:
 
 ### Dashboard Preview
 
-*Add Power BI dashboard screenshots here.*
+#### 1. Sales Dashboard
+
+![Sales Dashboard](01_Sales_Dashboard.png)
+
+#### 2. Store Performance Dashboard
+
+![Store Performance](02_Store_Performance.png)
+
+#### 3. IoT Operations Dashboard
+
+![IoT Operations](03_IoT_Operations_Dashboard.png)
+
+#### 4. Alerts & Sales Dashboard
+
+![Alerts & Sales](04_Alerts_Sales_Dashboard.png)
 
 ## 📁 Repository Structure
 
@@ -115,6 +129,11 @@ GlobalMart-Retail-IoT-Analytics/
 ├── setup/
 │   └── Snowflake and AWS S3 setup scripts
 │
+├── 01_Sales_Dashboard.png
+├── 02_Store_Performance.png
+├── 03_IoT_Operations_Dashboard.png
+├── 04_Alerts_Sales_Dashboard.png
+│
 └── README.md
 ```
 
@@ -126,7 +145,8 @@ GlobalMart-Retail-IoT-Analytics/
 * Used Snowpipe for automated data ingestion
 * Worked with Snowflake Streams for change tracking
 * Created analytical data models for Power BI
-* Developed business dashboards and analytics
+* Developed business dashboards for retail and IoT analytics
+* Worked with SQL for data extraction, transformation, validation, and analysis
 
 ## 👤 Author
 
@@ -134,4 +154,4 @@ GlobalMart-Retail-IoT-Analytics/
 
 BCA Student | Data Analytics
 
-Skills: SQL | Python | Power BI | Snowflake | AWS S3 | Excel | Git & GitHub
+**Skills:** SQL | Python | Power BI | Snowflake | AWS S3 | Excel | Git & GitHub
