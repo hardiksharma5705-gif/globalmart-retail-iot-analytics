@@ -13,8 +13,6 @@ enabled=true
 storage_aws_role_arn='arn:aws:iam::597601766568:role/globalmart'
 storage_allowed_locations=('s3://globalmart-data-001/');
 
-desc  integration s3_globalmart_int;
-
 
 
 --EXTERNAL STAGE--
