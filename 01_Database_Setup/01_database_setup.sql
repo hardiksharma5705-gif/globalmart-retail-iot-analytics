@@ -1,4 +1,4 @@
-create or database globalmart_db;
+create  database globalmart_db;
 use database globalmart_db;
 
 
